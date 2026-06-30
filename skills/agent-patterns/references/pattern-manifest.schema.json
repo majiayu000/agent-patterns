@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-patterns.local/schema/pattern-manifest.schema.json",
+  "title": "Agent Pattern Manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "skill",
+    "title",
+    "summary",
+    "category",
+    "tags",
+    "maturity",
+    "risk_level",
+    "capabilities",
+    "requires_human_gate",
+    "source",
+    "maintained_as"
+  ],
+  "properties": {
+    "id": { "type": "string", "pattern": "^agent-pattern\\.[a-z0-9_.-]+\\.v[0-9]+$" },
+    "skill": { "type": "string", "pattern": "^[a-z0-9-]+$" },
+    "title": { "type": "string", "minLength": 1 },
+    "summary": { "type": "string", "minLength": 1 },
+    "category": { "type": "string", "minLength": 1 },
+    "tags": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+    "maturity": { "enum": ["draft", "community", "runnable", "verified", "deprecated"] },
+    "risk_level": { "enum": ["low", "medium", "high", "critical"] },
+    "capabilities": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+    "requires_human_gate": { "type": "boolean" },
+    "source": { "const": "SKILL.md" },
+    "maintained_as": { "const": "skill-first" }
+  }
+}

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Agent Patterns"
+  short_description: "Build executable agent workflow skills"
+  default_prompt: "Use $agent-patterns to create or export an executable agent workflow pattern."

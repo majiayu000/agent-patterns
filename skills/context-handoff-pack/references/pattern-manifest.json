@@ -1,0 +1,14 @@
+{
+  "id": "agent-pattern.context-handoff-pack.v1",
+  "skill": "context-handoff-pack",
+  "title": "Context Handoff Pack",
+  "summary": "Create compact, evidence-backed handoff packs for long-running agent tasks before compaction or session transfer.",
+  "category": "contextops.handoff",
+  "tags": ["context", "handoff", "compaction", "drift", "evidence"],
+  "maturity": "runnable",
+  "risk_level": "medium",
+  "capabilities": ["repo_read", "git_status", "evidence_tracking", "handoff_summary"],
+  "requires_human_gate": false,
+  "source": "SKILL.md",
+  "maintained_as": "skill-first"
+}

@@ -1,0 +1,4 @@
+interface:
+  display_name: "CI Failure Diagnosis"
+  short_description: "Find CI root cause before fixes"
+  default_prompt: "Use $ci-failure-diagnosis to diagnose this failing CI run from fresh evidence."

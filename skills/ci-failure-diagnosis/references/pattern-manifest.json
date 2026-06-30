@@ -1,0 +1,14 @@
+{
+  "id": "agent-pattern.ci-failure-diagnosis.v1",
+  "skill": "ci-failure-diagnosis",
+  "title": "CI Failure Diagnosis",
+  "summary": "Diagnose failing CI from fresh evidence, reproduce the smallest failing command, and identify root cause before fixing.",
+  "category": "coding.ci",
+  "tags": ["coding", "ci", "github-actions", "debug", "verification"],
+  "maturity": "runnable",
+  "risk_level": "high",
+  "capabilities": ["ci_log_read", "repo_read", "git", "shell_repro"],
+  "requires_human_gate": true,
+  "source": "SKILL.md",
+  "maintained_as": "skill-first"
+}

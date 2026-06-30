@@ -1,0 +1,14 @@
+{
+  "id": "agent-pattern.pr-review-risk-plan.v1",
+  "skill": "pr-review-risk-plan",
+  "title": "PR Review Risk Plan",
+  "summary": "Review pull requests by ranking behavioral risks, identifying missing tests, and producing verification commands.",
+  "category": "coding.pr_review",
+  "tags": ["coding", "review", "github", "risk", "verification"],
+  "maturity": "runnable",
+  "risk_level": "high",
+  "capabilities": ["repo_read", "git", "github_read", "shell_verification"],
+  "requires_human_gate": true,
+  "source": "SKILL.md",
+  "maintained_as": "skill-first"
+}

@@ -1,0 +1,4 @@
+interface:
+  display_name: "PR Review Risk Plan"
+  short_description: "Review PRs by ranked behavioral risk"
+  default_prompt: "Use $pr-review-risk-plan to review this pull request for behavioral risks and verification gaps."
