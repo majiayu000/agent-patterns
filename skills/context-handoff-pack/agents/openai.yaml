@@ -1,4 +1,4 @@
 interface:
   display_name: "Context Handoff Pack"
-  short_description: "Create compact agent handoff context"
-  default_prompt: "Use $context-handoff-pack to prepare a precise handoff for this long-running task."
+  short_description: "Create evidence-backed agent handoffs"
+  default_prompt: "Use $context-handoff-pack to prepare a precise handoff for this long-running task, including Codex session evidence when relevant."

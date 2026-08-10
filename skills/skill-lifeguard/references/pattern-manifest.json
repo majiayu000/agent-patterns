@@ -1,0 +1,14 @@
+{
+  "id": "agent-pattern.skill-lifeguard.v1",
+  "skill": "skill-lifeguard",
+  "title": "Skill Lifeguard (Reliable Skill Pattern)",
+  "summary": "Audit and harden skills with mandatory Negative Examples, Verification Checkpoints, machine-checkable Done conditions, Replay hooks, and Drift signal detection. Turns brittle skills into self-maintaining ones.",
+  "category": "agent.meta.skill_reliability",
+  "tags": ["skill", "reliability", "guard", "verification", "drift", "negative-examples", "checkpoint"],
+  "maturity": "runnable",
+  "risk_level": "low",
+  "capabilities": ["skill_audit", "template_generation", "drift_detection", "verification_design"],
+  "requires_human_gate": false,
+  "source": "SKILL.md",
+  "maintained_as": "skill-first"
+}
