@@ -6,20 +6,15 @@ import collections
 import datetime as dt
 import json
 import re
-import sys
 from pathlib import Path
 from typing import Any
-
-
-SHARED_SCRIPTS = Path(__file__).resolve().parents[2] / "agent-patterns" / "scripts"
-if str(SHARED_SCRIPTS) not in sys.path:
-    sys.path.insert(0, str(SHARED_SCRIPTS))
 
 from session_log_utils import (
     iter_jsonl,
     load_codex_session_meta,
-    redact_secret_like_values,
-    same_or_nested_path,
+    redact_and_truncate,
+    same_repository_scope,
+    sanitize_output,
     utc_iso_from_timestamp,
 )
 
@@ -70,8 +65,9 @@ def probe(home: Path, cwd: str, session_id: str | None, limit: int, include_text
         if session_id and sid != session_id:
             continue
         session_cwd = meta.get(sid, {}).get("cwd", "")
-        if not session_id and cwd and session_cwd and not same_or_nested_path(session_cwd, cwd):
-            continue
+        if not session_id:
+            if not cwd or not session_cwd or not same_repository_scope(session_cwd, cwd):
+                continue
         text = str(row.get("text") or "")
         if not text.strip():
             continue
@@ -79,7 +75,7 @@ def probe(home: Path, cwd: str, session_id: str | None, limit: int, include_text
             {
                 "ts": row.get("ts") or row.get("timestamp") or "",
                 "signals": classify_probe_signals(text),
-                "text": redact_secret_like_values(text[:240].replace("\n", " ")) if include_text else None,
+                "text": redact_and_truncate(text, 240) if include_text else None,
             }
         )
 
@@ -96,13 +92,13 @@ def probe(home: Path, cwd: str, session_id: str | None, limit: int, include_text
                 "updated_at": latest_probe_ts(rows) or meta_row.get("timestamp", ""),
                 "history_rows": len(rows),
                 "signals": dict(signal_counts.most_common()),
-                "thread_title": redact_secret_like_values(title) if include_text and title else None,
+                "thread_title": redact_and_truncate(title, 240) if include_text and title else None,
                 "recent": rows[-3:] if include_text else [],
             }
         )
 
     sessions.sort(key=lambda item: str(item.get("updated_at") or ""), reverse=True)
-    return {
+    result = {
         "generated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
         "cwd": cwd,
         "codex_home": str(codex),
@@ -115,6 +111,7 @@ def probe(home: Path, cwd: str, session_id: str | None, limit: int, include_text
         "matching_sessions": len(sessions),
         "sessions": sessions[:limit],
     }
+    return sanitize_output(result)
 
 
 def load_titles(path: Path) -> dict[str, str]:
@@ -132,7 +129,7 @@ def classify_probe_signals(text: str) -> list[str]:
 
 
 def latest_probe_ts(rows: list[dict[str, Any]]) -> str:
-    values = [row.get("ts") for row in rows if row.get("ts") not in {None, ""}]
+    values = [row.get("ts") for row in rows if row.get("ts") is not None and row.get("ts") != ""]
     if not values:
         return ""
     return utc_iso_from_timestamp(values[-1])

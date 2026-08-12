@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import datetime as dt
 import json
 import re
 from pathlib import Path
@@ -16,6 +15,8 @@ SECRET_KEY_NAMES = {
     "authorization",
     "auth_token",
     "authtoken",
+    "aws_secret_access_key",
+    "awssecretaccesskey",
     "client_secret",
     "clientsecret",
     "cookie",
@@ -30,8 +31,6 @@ SECRET_KEY_NAMES = {
     "set_cookie",
     "setcookie",
     "token",
-    "aws_secret_access_key",
-    "awssecretaccesskey",
 }
 SECRET_KEY_PATTERN = re.compile(
     r"(?i)(?P<prefix>(?P<key_quote>['\"]?)"
@@ -202,15 +201,3 @@ def discover_git_root(path: Path) -> Path | None:
         if (candidate / ".git").exists():
             return candidate
     return None
-
-
-def utc_iso_from_timestamp(value: Any) -> str:
-    if value is None or value == "":
-        return ""
-    if isinstance(value, (int, float)):
-        timestamp = value / 1000 if value > 10_000_000_000 else value
-        try:
-            return dt.datetime.fromtimestamp(timestamp, dt.timezone.utc).isoformat()
-        except (OSError, OverflowError, ValueError):
-            return str(value)
-    return str(value)

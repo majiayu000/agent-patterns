@@ -16,6 +16,8 @@ SECRET_KEY_NAMES = {
     "authorization",
     "auth_token",
     "authtoken",
+    "aws_secret_access_key",
+    "awssecretaccesskey",
     "client_secret",
     "clientsecret",
     "cookie",
@@ -30,8 +32,6 @@ SECRET_KEY_NAMES = {
     "set_cookie",
     "setcookie",
     "token",
-    "aws_secret_access_key",
-    "awssecretaccesskey",
 }
 SECRET_KEY_PATTERN = re.compile(
     r"(?i)(?P<prefix>(?P<key_quote>['\"]?)"

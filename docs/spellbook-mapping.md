@@ -1,6 +1,6 @@
 # Mapping These Patterns to Spellbook
 
-These patterns in the `be` workspace are designed to be turned into first-class skills in https://github.com/majiayu000/spellbook.
+These patterns in the `agent-patterns` repository are designed to be turned into first-class skills in https://github.com/majiayu000/spellbook.
 
 ## 1. skill-lifeguard → Reliable Skill Contract
 
@@ -54,5 +54,8 @@ These three directly address the top X-reported pains:
 - Unvetted agent changes landing (review-gate)
 
 Run the local pattern validator after porting:
+
+```sh
 python3 scripts/validate_skills.py --check
 python3 scripts/audit_skill_quality.py <new-skill>
+```

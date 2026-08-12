@@ -9,8 +9,10 @@ This workspace now models Agent Patterns as skills, not as a standalone hardcode
 - `skills/ci-failure-diagnosis`: concrete CI root-cause workflow skill.
 - `skills/context-handoff-pack`: concrete long-session handoff workflow skill with a Codex local-history probe.
 - `skills/agent-session-pattern-miner`: concrete workflow-mining skill that turns local Codex/Claude session history into new-skill and enhancement candidates.
+- `skills/review-gate`: explicit human approval gate before agent-generated changes land.
+- `skills/skill-lifeguard`: reliability contract for evolving skills from observed failures.
 
-The scripts under `skills/agent-patterns/scripts/` are bundled skill resources. `pattern_tool.py` validates and searches lightweight manifests in each concrete skill's `references/pattern-manifest.json`; shared utilities support local session-history helpers. Scripts are not the main product surface.
+The scripts under `skills/agent-patterns/scripts/` are bundled skill resources. `pattern_tool.py` validates and searches lightweight manifests in each concrete skill's `references/pattern-manifest.json`. Each runnable session-history skill vendors its small utility module inside its own skill folder so copying the folder remains standalone. Scripts are not the main product surface.
 
 `SKILL.md` is the source of truth for workflow behavior. Manifests are search/index metadata only.
 
@@ -23,6 +25,8 @@ python3 "$QUICK_VALIDATE" skills/pr-review-risk-plan
 python3 "$QUICK_VALIDATE" skills/ci-failure-diagnosis
 python3 "$QUICK_VALIDATE" skills/context-handoff-pack
 python3 "$QUICK_VALIDATE" skills/agent-session-pattern-miner
+python3 "$QUICK_VALIDATE" skills/review-gate
+python3 "$QUICK_VALIDATE" skills/skill-lifeguard
 python3 skills/agent-patterns/scripts/pattern_tool.py validate
-python3 -m unittest discover -s tests
+SKILL_CREATOR_QUICK_VALIDATE="$QUICK_VALIDATE" python3 -m unittest discover -s tests -v
 ```

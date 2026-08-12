@@ -6,16 +6,10 @@ import collections
 import datetime as dt
 import json
 import re
-import sys
 from pathlib import Path
 from typing import Any
 
-
-SHARED_SCRIPTS = Path(__file__).resolve().parents[2] / "agent-patterns" / "scripts"
-if str(SHARED_SCRIPTS) not in sys.path:
-    sys.path.insert(0, str(SHARED_SCRIPTS))
-
-from session_log_utils import iter_jsonl, load_codex_session_meta, redact_secret_like_values
+from session_log_utils import iter_jsonl, load_codex_session_meta, redact_and_truncate, sanitize_output
 
 
 CATEGORY_SPECS = [
@@ -132,7 +126,7 @@ def mine(home: Path, source: str, include_examples: bool, limit_projects: int) -
         )
 
     candidates = rank_candidates(aggregate["category_counts"], aggregate["category_sessions"])
-    return {
+    result = {
         "generated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
         "home": str(home),
         "sources": aggregate["sources"],
@@ -141,6 +135,7 @@ def mine(home: Path, source: str, include_examples: bool, limit_projects: int) -
         "candidates": candidates,
         "top_projects": [{"project": project, "messages": count} for project, count in aggregate["project_counts"].most_common(limit_projects)],
     }
+    return sanitize_output(result)
 
 
 def empty_aggregate() -> dict[str, Any]:
@@ -238,7 +233,7 @@ def add_text(agg: dict[str, Any], source: str, session_id: str, project: str, te
         agg["category_counts"][category] += 1
         agg["category_sessions"][category].add(f"{source}:{session_id}")
         if include_examples and len(agg["examples"][category]) < 3:
-            agg["examples"][category].append(redact_secret_like_values(text[:220].replace("\n", " ")))
+            agg["examples"][category].append(redact_and_truncate(text, 220))
 
 
 def classify_categories(text: str) -> list[str]:
