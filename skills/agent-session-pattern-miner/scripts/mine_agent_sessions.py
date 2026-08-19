@@ -121,11 +121,16 @@ def mine(home: Path, source: str, include_examples: bool, limit_projects: int) -
                 "id": name,
                 "messages": count,
                 "sessions": len(aggregate["category_sessions"][name]),
+                "projects": len(aggregate["category_projects"][name]),
                 "examples": aggregate["examples"].get(name, []),
             }
         )
 
-    candidates = rank_candidates(aggregate["category_counts"], aggregate["category_sessions"])
+    candidates = rank_candidates(
+        aggregate["category_counts"],
+        aggregate["category_sessions"],
+        aggregate["category_projects"],
+    )
     result = {
         "generated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
         "home": str(home),
@@ -144,6 +149,7 @@ def empty_aggregate() -> dict[str, Any]:
         "totals": collections.Counter(),
         "category_counts": collections.Counter(),
         "category_sessions": collections.defaultdict(set),
+        "category_projects": collections.defaultdict(set),
         "project_counts": collections.Counter(),
         "examples": collections.defaultdict(list),
     }
@@ -156,6 +162,8 @@ def merge_aggregate(target: dict[str, Any], source: dict[str, Any]) -> None:
     target["project_counts"].update(source["project_counts"])
     for key, value in source["category_sessions"].items():
         target["category_sessions"][key].update(value)
+    for key, value in source["category_projects"].items():
+        target["category_projects"][key].update(value)
     for key, values in source["examples"].items():
         target["examples"][key].extend(values)
 
@@ -211,13 +219,13 @@ def mine_claude(home: Path, include_examples: bool) -> dict[str, Any]:
         for row in iter_jsonl(path):
             if not is_user_record(row):
                 continue
-            for text in extract_texts(row):
+            for text in extract_texts(row, skip_non_human_content=True):
                 add_text(agg, "claude", session_id, project, text, include_examples)
                 agg["totals"]["claude_user_messages"] += 1
     for path in task_files:
         try:
             data = json.loads(path.read_text(encoding="utf-8", errors="replace"))
-        except (OSError, json.JSONDecodeError):
+        except (OSError, ValueError, RecursionError):
             agg["totals"]["claude_task_parse_errors"] += 1
             continue
         for text in extract_texts(data):
@@ -232,6 +240,7 @@ def add_text(agg: dict[str, Any], source: str, session_id: str, project: str, te
     for category in classify_categories(text):
         agg["category_counts"][category] += 1
         agg["category_sessions"][category].add(f"{source}:{session_id}")
+        agg["category_projects"][category].add(project)
         if include_examples and len(agg["examples"][category]) < 3:
             agg["examples"][category].append(redact_and_truncate(text, 220))
 
@@ -240,27 +249,45 @@ def classify_categories(text: str) -> list[str]:
     return [name for name, regex in COMPILED_CATEGORIES if regex.search(text)]
 
 
-def rank_candidates(counts: collections.Counter[str], sessions: dict[str, set[str]]) -> list[dict[str, Any]]:
+def rank_candidates(
+    counts: collections.Counter[str],
+    sessions: dict[str, set[str]],
+    projects: dict[str, set[str]],
+) -> list[dict[str, Any]]:
     candidates = []
     for spec in CANDIDATE_SPECS:
         evidence = []
         score = 0
         session_ids: set[str] = set()
+        project_ids: set[str] = set()
         for category in spec["categories"]:
             category_count = counts.get(category, 0)
             if category_count:
-                evidence.append({"category": category, "messages": category_count, "sessions": len(sessions[category])})
+                evidence.append(
+                    {
+                        "category": category,
+                        "messages": category_count,
+                        "sessions": len(sessions[category]),
+                        "projects": len(projects[category]),
+                    }
+                )
                 score += category_count
                 session_ids.update(sessions[category])
+                project_ids.update(projects[category])
         if not evidence:
             continue
         confidence = "high" if score >= 100 and len(session_ids) >= 40 else "medium" if score >= 20 else "low"
+        scope = "cross-project" if len(project_ids) > 1 else "project-specific"
+        if scope == "project-specific" and confidence == "high":
+            confidence = "medium"
         candidates.append(
             {
                 "skill": spec["skill"],
                 "action": spec["action"],
                 "score": score,
                 "sessions": len(session_ids),
+                "projects": len(project_ids),
+                "scope": scope,
                 "confidence": confidence,
                 "risk_level": spec["risk_level"],
                 "evidence": evidence,
@@ -279,22 +306,25 @@ def is_user_record(row: dict[str, Any]) -> bool:
     return role == "user" or row_type in {"user", "human"} or row_type.endswith("user_message")
 
 
-def extract_texts(value: Any) -> list[str]:
+def extract_texts(value: Any, skip_non_human_content: bool = False) -> list[str]:
     texts: list[str] = []
     if isinstance(value, str):
         if value.strip():
             texts.append(value)
     elif isinstance(value, list):
         for item in value:
-            texts.extend(extract_texts(item))
+            texts.extend(extract_texts(item, skip_non_human_content))
     elif isinstance(value, dict):
+        content_type = str(value.get("type") or "").lower()
+        if skip_non_human_content and content_type in {"tool_result", "tool_use", "image", "document"}:
+            return texts
         for key in ("text", "input_text", "content", "prompt", "summary", "thread_name"):
             if key in value:
-                texts.extend(extract_texts(value[key]))
+                texts.extend(extract_texts(value[key], skip_non_human_content))
         if "message" in value:
-            texts.extend(extract_texts(value["message"]))
+            texts.extend(extract_texts(value["message"], skip_non_human_content))
         if "payload" in value:
-            texts.extend(extract_texts(value["payload"]))
+            texts.extend(extract_texts(value["payload"], skip_non_human_content))
     return texts
 
 

@@ -170,6 +170,9 @@ class AgentPatternsSkillTest(unittest.TestCase):
             "url_user": "database-user-private",
             "url_password": "database-password-private",
             "pem_body": "MIIEvQIBADANBgkqhkiG9w0BAQEFAASC",
+            "github_pat": "github_pat_11AAABBBCCCDDDEEEFFF111222333",
+            "gitlab_pat": "glpat-abcdefghijklmnopqrstuvwxyz123456",
+            "slack_token": "xox" + "b-123456789012-abcdefghijklmnopqrstuvwxyz",
         }
         text = json.dumps(
             {
@@ -184,6 +187,7 @@ class AgentPatternsSkillTest(unittest.TestCase):
             f"\nAWS_SECRET_ACCESS_KEY={secrets['aws_secret']}"
             f"\nCookie: session={secrets['cookie']}; HttpOnly"
             f"\n-----BEGIN PRIVATE KEY-----\n{secrets['pem_body']}\n-----END PRIVATE KEY-----"
+            f"\nGitHub={secrets['github_pat']} GitLab={secrets['gitlab_pat']} Slack={secrets['slack_token']}"
         )
 
         modules = [
@@ -329,12 +333,29 @@ class AgentPatternsSkillTest(unittest.TestCase):
             self.assertEqual(explicit.returncode, 0, explicit.stderr)
             self.assertEqual(json.loads(explicit.stdout)["sessions"][0]["session_id"], "unknown")
 
+            cross_repository = self.run_cmd(
+                sys.executable,
+                "skills/context-handoff-pack/scripts/codex_handoff_probe.py",
+                "--home",
+                str(home),
+                "--cwd",
+                str(project),
+                "--session-id",
+                "other",
+                "--include-text",
+                "--format",
+                "json",
+            )
+            self.assertEqual(cross_repository.returncode, 0, cross_repository.stderr)
+            self.assertEqual(json.loads(cross_repository.stdout)["matching_sessions"], 0)
+            self.assertNotIn("other private marker", cross_repository.stdout)
+
     def test_jsonl_readers_tolerate_malformed_scalars_arrays_and_null(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             home = Path(tmp)
             project = home / "work/repo"
             project.mkdir(parents=True)
-            prefix = 'null\n[]\n"scalar"\n{malformed\n'
+            prefix = 'null\n[]\n"scalar"\n{malformed\n{"huge":' + "9" * 5000 + "}\n"
             history = home / ".codex/history.jsonl"
             history.parent.mkdir(parents=True, exist_ok=True)
             history.write_text(
@@ -364,6 +385,86 @@ class AgentPatternsSkillTest(unittest.TestCase):
             )
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual(json.loads(result.stdout)["matching_sessions"], 1)
+
+    def test_claude_tool_results_are_not_mined_as_human_text(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            self.write_jsonl(
+                home / ".claude/projects/example/session.jsonl",
+                [
+                    {
+                        "type": "user",
+                        "message": {
+                            "role": "user",
+                            "content": [
+                                {"type": "tool_result", "content": "publish secret tool output"}
+                            ],
+                        },
+                    },
+                    {
+                        "type": "user",
+                        "message": {
+                            "role": "user",
+                            "content": [{"type": "text", "text": "review this PR"}],
+                        },
+                    },
+                ],
+            )
+            result = self.run_cmd(
+                sys.executable,
+                "skills/agent-session-pattern-miner/scripts/mine_agent_sessions.py",
+                "--home",
+                str(home),
+                "--source",
+                "claude",
+                "--include-examples",
+                "--format",
+                "json",
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertNotIn("secret tool output", result.stdout)
+            self.assertEqual(json.loads(result.stdout)["totals"]["claude_user_messages"], 1)
+
+    def test_single_project_evidence_is_not_high_confidence(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            project = home / "work/one-repo"
+            project.mkdir(parents=True)
+            self.write_jsonl(
+                home / ".codex/history.jsonl",
+                [
+                    {
+                        "session_id": f"session-{index}",
+                        "text": "continue context and turn this into a skill",
+                    }
+                    for index in range(60)
+                ],
+            )
+            for index in range(60):
+                self.write_jsonl(
+                    home / f".codex/sessions/rollout-session-{index}.jsonl",
+                    [
+                        {
+                            "type": "session_meta",
+                            "payload": {"id": f"session-{index}", "cwd": str(project)},
+                        }
+                    ],
+                )
+            result = self.run_cmd(
+                sys.executable,
+                "skills/agent-session-pattern-miner/scripts/mine_agent_sessions.py",
+                "--home",
+                str(home),
+                "--source",
+                "codex",
+                "--format",
+                "json",
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            candidates = json.loads(result.stdout)["candidates"]
+            candidate = next(item for item in candidates if item["skill"] == "agent-session-pattern-miner")
+            self.assertEqual(candidate["scope"], "project-specific")
+            self.assertEqual(candidate["confidence"], "medium")
 
     def test_runnable_skills_work_when_copied_standalone(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

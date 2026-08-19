@@ -65,9 +65,10 @@ def probe(home: Path, cwd: str, session_id: str | None, limit: int, include_text
         if session_id and sid != session_id:
             continue
         session_cwd = meta.get(sid, {}).get("cwd", "")
-        if not session_id:
-            if not cwd or not session_cwd or not same_repository_scope(session_cwd, cwd):
-                continue
+        if not session_id and (not cwd or not session_cwd):
+            continue
+        if cwd and session_cwd and not same_repository_scope(session_cwd, cwd):
+            continue
         text = str(row.get("text") or "")
         if not text.strip():
             continue

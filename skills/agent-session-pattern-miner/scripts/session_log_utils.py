@@ -58,6 +58,9 @@ PEM_PRIVATE_KEY_PATTERN = re.compile(
 SECRET_PATTERNS = [
     re.compile(r"\bsk-[A-Za-z0-9_-]{12,}\b"),
     re.compile(r"\bgh[pousr]_[A-Za-z0-9_]{20,}\b"),
+    re.compile(r"\bgithub_pat_[A-Za-z0-9_]{20,}\b"),
+    re.compile(r"\bglpat-[A-Za-z0-9_-]{20,}\b"),
+    re.compile(r"\bxox[aboprs]-[A-Za-z0-9-]{10,}\b"),
     re.compile(r"\b(?:AKIA|ASIA)[A-Z0-9]{16}\b"),
     re.compile(r"\beyJ[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]{5,}\b"),
     re.compile(r"(?i)(?<=\bbearer\s)[A-Za-z0-9._~+/=-]{8,}"),
@@ -75,7 +78,7 @@ def iter_jsonl(path: Path) -> Iterable[dict[str, Any]]:
                     continue
                 try:
                     row = json.loads(line)
-                except json.JSONDecodeError:
+                except (ValueError, RecursionError):
                     continue
                 if isinstance(row, dict):
                     yield row
@@ -91,7 +94,7 @@ def load_codex_session_meta(paths: Iterable[Path], max_header_lines: int = 80) -
                 for _, line in zip(range(max_header_lines), handle):
                     try:
                         row = json.loads(line)
-                    except json.JSONDecodeError:
+                    except (ValueError, RecursionError):
                         continue
                     if not isinstance(row, dict) or row.get("type") != "session_meta":
                         continue
