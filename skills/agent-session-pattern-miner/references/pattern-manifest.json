@@ -1,0 +1,14 @@
+{
+  "id": "agent-pattern.agent-session-pattern-miner.v1",
+  "skill": "agent-session-pattern-miner",
+  "title": "Agent Session Pattern Miner",
+  "summary": "Mine local Codex and Claude session history into ranked candidates for new or enhanced agent workflow skills.",
+  "category": "contextops.discovery",
+  "tags": ["session-history", "skills", "workflow-mining", "codex", "claude"],
+  "maturity": "runnable",
+  "risk_level": "medium",
+  "capabilities": ["local_history_read", "workflow_classification", "skill_backlog", "privacy_preserving_summary"],
+  "requires_human_gate": false,
+  "source": "SKILL.md",
+  "maintained_as": "skill-first"
+}

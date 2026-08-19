@@ -52,3 +52,5 @@ Require human approval before posting a GitHub review, approving a PR, merging, 
 - Ranked findings include concrete evidence or state that no issues were found.
 - Verification commands and results are fresh from the current session, or explicitly marked not run.
 - Residual risks and assumptions are visible.
+
+This skill is typically invoked **inside** the `review-gate` pattern when an agent wants to land changes. Use review-gate for the human approval orchestration.

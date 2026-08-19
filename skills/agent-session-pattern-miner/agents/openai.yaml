@@ -1,0 +1,4 @@
+interface:
+  display_name: "Agent Session Pattern Miner"
+  short_description: "Mine chats into reusable agent skills"
+  default_prompt: "Use $agent-session-pattern-miner to analyze local agent chat history and identify reusable workflow skills."

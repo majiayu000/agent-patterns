@@ -1,0 +1,14 @@
+{
+  "id": "agent-pattern.review-gate.v1",
+  "skill": "review-gate",
+  "title": "Review Gate",
+  "summary": "Force explicit review pack + human approval before any agent-produced diff is committed, pushed, or landed. Prevents unvetted agent changes from shipping.",
+  "category": "delivery.review_gate",
+  "tags": ["review", "gate", "diff", "human-gate", "landing", "risk", "pr"],
+  "maturity": "runnable",
+  "risk_level": "high",
+  "capabilities": ["git", "repo_read", "risk_analysis", "human_gate", "handoff_update"],
+  "requires_human_gate": true,
+  "source": "SKILL.md",
+  "maintained_as": "skill-first"
+}

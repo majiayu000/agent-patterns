@@ -48,6 +48,8 @@ python3 skills/agent-patterns/scripts/pattern_tool.py list
 python3 skills/agent-patterns/scripts/pattern_tool.py search "pr review"
 python3 skills/agent-patterns/scripts/pattern_tool.py validate
 python3 skills/agent-patterns/scripts/pattern_tool.py show pr-review-risk-plan.v1
+python3 skills/agent-patterns/scripts/pattern_tool.py show skill-lifeguard.v1
+python3 skills/agent-patterns/scripts/pattern_tool.py show review-gate.v1
 ```
 
 ## Output Rules

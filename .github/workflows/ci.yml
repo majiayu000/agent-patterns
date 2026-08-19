@@ -1,0 +1,58 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Python ${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12", "3.13"]
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Check out pinned skill validator
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          repository: openai/skills
+          ref: 49f948faa9258a0c61caceaf225e179651397431
+          path: .ci/openai-skills
+          persist-credentials: false
+
+      - name: Install validator dependency
+        run: python -m pip install --disable-pip-version-check --no-input PyYAML==6.0.3
+
+      - name: Validate manifests and all skills
+        env:
+          SKILL_CREATOR_QUICK_VALIDATE: ${{ github.workspace }}/.ci/openai-skills/skills/.system/skill-creator/scripts/quick_validate.py
+        run: |
+          test -f "$SKILL_CREATOR_QUICK_VALIDATE"
+          python skills/agent-patterns/scripts/pattern_tool.py validate
+          validated=0
+          for skill in skills/*/SKILL.md; do
+            python "$SKILL_CREATOR_QUICK_VALIDATE" "${skill%/SKILL.md}"
+            validated=$((validated + 1))
+          done
+          test "$validated" -eq "$(find skills -mindepth 2 -maxdepth 2 -name SKILL.md | wc -l | tr -d ' ')"
+
+      - name: Run tests
+        env:
+          SKILL_CREATOR_QUICK_VALIDATE: ${{ github.workspace }}/.ci/openai-skills/skills/.system/skill-creator/scripts/quick_validate.py
+        run: python -m unittest discover -s tests -v
