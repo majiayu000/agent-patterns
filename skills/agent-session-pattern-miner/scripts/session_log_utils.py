@@ -57,6 +57,8 @@ PEM_PRIVATE_KEY_PATTERN = re.compile(
 )
 SECRET_PATTERNS = [
     re.compile(r"\bsk-[A-Za-z0-9_-]{12,}\b"),
+    re.compile(r"\bsk_(?:live|test)_[A-Za-z0-9]+"),
+    re.compile(r"\bAIza[0-9A-Za-z_-]{20,}"),
     re.compile(r"\bgh[pousr]_[A-Za-z0-9_]{20,}\b"),
     re.compile(r"\bgithub_pat_[A-Za-z0-9_]{20,}\b"),
     re.compile(r"\bglpat-[A-Za-z0-9_-]{20,}\b"),

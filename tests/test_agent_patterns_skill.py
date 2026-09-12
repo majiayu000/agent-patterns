@@ -64,6 +64,9 @@ class AgentPatternsSkillTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             home = Path(tmp)
             aws_canary = "AKIAIOSFODNN7EXAMPLE"
+            # Split canaries so push-protection scanners do not treat fixtures as live secrets.
+            stripe_canary = "sk_" + "live_" + "canaryredacttestvalue123"
+            google_canary = "AIza" + "SyDdIabcdefghijklmnopqrs"
             project = home / "work" / aws_canary / "repo"
             project.mkdir(parents=True)
             self.write_jsonl(
@@ -71,7 +74,10 @@ class AgentPatternsSkillTest(unittest.TestCase):
                 [
                     {
                         "session_id": "codex-1",
-                        "text": "continue this repo handoff and publish GitHub public repo",
+                        "text": (
+                            "continue this repo handoff and publish GitHub public repo "
+                            f"stripe={stripe_canary} google={google_canary}"
+                        ),
                         "ts": 1782900000,
                     },
                     {
@@ -113,12 +119,16 @@ class AgentPatternsSkillTest(unittest.TestCase):
             self.assertIn("agent-session-pattern-miner", candidate_ids)
             self.assertIn("context-handoff-pack", candidate_ids)
             self.assertNotIn(aws_canary, result.stdout)
+            self.assertNotIn(stripe_canary, result.stdout)
+            self.assertNotIn(google_canary, result.stdout)
 
     def test_codex_handoff_probe_with_local_fixtures(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             home = Path(tmp)
             aws_canary = "AKIAIOSFODNN7EXAMPLE"
             jwt_canary = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJwcml2YXRlIn0.signaturevalue"
+            stripe_canary = "sk_" + "test_" + "canaryredacttestvalue123"
+            google_canary = "AIza" + "SyDdIabcdefghijklmnopqrs"
             project = home / "work" / aws_canary / "repo"
             project.mkdir(parents=True)
             self.write_jsonl(
@@ -126,7 +136,10 @@ class AgentPatternsSkillTest(unittest.TestCase):
                 [
                     {
                         "session_id": "codex-1",
-                        "text": "continue and run pytest before publish",
+                        "text": (
+                            "continue and run pytest before publish "
+                            f"stripe={stripe_canary} google={google_canary}"
+                        ),
                         "ts": jwt_canary,
                     }
                 ],
@@ -158,6 +171,8 @@ class AgentPatternsSkillTest(unittest.TestCase):
             self.assertNotIn("private task title", result.stdout)
             self.assertNotIn(aws_canary, result.stdout)
             self.assertNotIn(jwt_canary, result.stdout)
+            self.assertNotIn(stripe_canary, result.stdout)
+            self.assertNotIn(google_canary, result.stdout)
 
     def test_secret_redaction_covers_structured_and_text_corpus(self) -> None:
         secrets = {
@@ -173,6 +188,9 @@ class AgentPatternsSkillTest(unittest.TestCase):
             "github_pat": "github_pat_11AAABBBCCCDDDEEEFFF111222333",
             "gitlab_pat": "glpat-abcdefghijklmnopqrstuvwxyz123456",
             "slack_token": "xox" + "b-123456789012-abcdefghijklmnopqrstuvwxyz",
+            "stripe_live": "sk_" + "live_" + "canaryredacttestvalue123",
+            "stripe_test": "sk_" + "test_" + "canaryredacttestvalue123",
+            "google_api": "AIza" + "SyDdIabcdefghijklmnopqrs",
         }
         text = json.dumps(
             {
@@ -180,6 +198,8 @@ class AgentPatternsSkillTest(unittest.TestCase):
                 "nested": {"password": secrets["nested"]},
                 "headers": {"Authorization": f"Bearer {secrets['jwt']}"},
                 "aws": secrets["aws"],
+                "stripe": secrets["stripe_live"],
+                "google": secrets["google_api"],
             }
         )
         text += (
@@ -188,6 +208,7 @@ class AgentPatternsSkillTest(unittest.TestCase):
             f"\nCookie: session={secrets['cookie']}; HttpOnly"
             f"\n-----BEGIN PRIVATE KEY-----\n{secrets['pem_body']}\n-----END PRIVATE KEY-----"
             f"\nGitHub={secrets['github_pat']} GitLab={secrets['gitlab_pat']} Slack={secrets['slack_token']}"
+            f"\nStripe={secrets['stripe_live']} StripeTest={secrets['stripe_test']} Google={secrets['google_api']}"
         )
 
         modules = [
