@@ -35,7 +35,10 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Probe local Codex records for context handoff evidence.")
     parser.add_argument("--home", default=str(Path.home()), help="Home directory containing .codex")
     parser.add_argument("--cwd", default=str(Path.cwd()), help="Workspace cwd to match against Codex session metadata")
-    parser.add_argument("--session-id", help="Limit to one Codex session id")
+    parser.add_argument(
+        "--session-id",
+        help="Limit to one Codex session id (skips repository-scope filtering so the named session is returned even when --cwd is in a different repo)",
+    )
     parser.add_argument("--limit", type=int, default=8, help="Recent sessions to show")
     parser.add_argument("--format", choices=["text", "json"], default="text")
     parser.add_argument("--include-text", action="store_true", help="Include short redacted user text excerpts")
@@ -65,10 +68,13 @@ def probe(home: Path, cwd: str, session_id: str | None, limit: int, include_text
         if session_id and sid != session_id:
             continue
         session_cwd = meta.get(sid, {}).get("cwd", "")
-        if not session_id and (not cwd or not session_cwd):
-            continue
-        if cwd and session_cwd and not same_repository_scope(session_cwd, cwd):
-            continue
+        # Explicit --session-id lookups bypass repository-scope filtering so operators
+        # can recover a named session even when --cwd is in a different repo.
+        if not session_id:
+            if not cwd or not session_cwd:
+                continue
+            if not same_repository_scope(session_cwd, cwd):
+                continue
         text = str(row.get("text") or "")
         if not text.strip():
             continue
