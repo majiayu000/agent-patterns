@@ -347,8 +347,10 @@ class AgentPatternsSkillTest(unittest.TestCase):
                 "json",
             )
             self.assertEqual(cross_repository.returncode, 0, cross_repository.stderr)
-            self.assertEqual(json.loads(cross_repository.stdout)["matching_sessions"], 0)
-            self.assertNotIn("other private marker", cross_repository.stdout)
+            cross_data = json.loads(cross_repository.stdout)
+            self.assertEqual(cross_data["matching_sessions"], 1)
+            self.assertEqual(cross_data["sessions"][0]["session_id"], "other")
+            self.assertIn("other private marker", cross_repository.stdout)
 
     def test_jsonl_readers_tolerate_malformed_scalars_arrays_and_null(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

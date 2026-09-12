@@ -55,7 +55,7 @@ Use the Codex adapter when the user says "continue", "what were we doing", asks 
 
 1. Run `scripts/codex_handoff_probe.py` with the current cwd.
 2. Inspect the returned matching sessions, signal counts, and rollout paths.
-3. If the match is ambiguous, narrow by `--session-id`, repo path, or timestamp before reading deeper.
+3. If the match is ambiguous, narrow by `--session-id`, repo path, or timestamp before reading deeper. `--session-id` skips repository-scope filtering, so the named session is returned even when `--cwd` is in a different repo than the session metadata cwd. Default cwd-scoped discovery is unchanged.
 4. Read only the smallest relevant rollout/history slice needed to recover state.
 5. Keep raw user text out of the handoff unless the user explicitly needs it; use `--include-text` only for short redacted excerpts.
 
@@ -129,4 +129,4 @@ It is intentionally lightweight so it can be embedded or referenced from flowgua
 
 ## Resources
 
-- `scripts/codex_handoff_probe.py`: aggregate local Codex history for the current cwd without printing raw text by default.
+- `scripts/codex_handoff_probe.py`: aggregate local Codex history for the current cwd without printing raw text by default. Pass `--session-id` to fetch one session by id across repository scope.
