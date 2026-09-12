@@ -259,6 +259,109 @@ class AgentPatternsSkillTest(unittest.TestCase):
         self.assertNotIn("sk-", excerpt)
         self.assertIn("[REDACTED]", excerpt)
 
+    def test_handoff_probe_parent_non_git_cwd_excludes_descendant_projects(self) -> None:
+        """SEC-04: non-git parent --cwd must not prefix-match child git sessions."""
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            parent = home / "work"
+            child1 = parent / "child1"
+            child2 = parent / "child2"
+            parent.mkdir(parents=True)
+            child1.mkdir(parents=True)
+            child2.mkdir(parents=True)
+            (child1 / ".git").mkdir()
+            (child2 / ".git").mkdir()
+            self.write_jsonl(
+                home / ".codex/history.jsonl",
+                [
+                    {"session_id": "child1", "text": "child1 private marker", "ts": 1},
+                    {"session_id": "child2", "text": "child2 private marker", "ts": 2},
+                    {"session_id": "parent-exact", "text": "parent exact marker", "ts": 3},
+                ],
+            )
+            self.write_jsonl(
+                home / ".codex/sessions/rollout-child1.jsonl",
+                [{"type": "session_meta", "payload": {"id": "child1", "cwd": str(child1)}}],
+            )
+            self.write_jsonl(
+                home / ".codex/sessions/rollout-child2.jsonl",
+                [{"type": "session_meta", "payload": {"id": "child2", "cwd": str(child2)}}],
+            )
+            self.write_jsonl(
+                home / ".codex/sessions/rollout-parent-exact.jsonl",
+                [{"type": "session_meta", "payload": {"id": "parent-exact", "cwd": str(parent)}}],
+            )
+
+            scoped = self.run_cmd(
+                sys.executable,
+                "skills/context-handoff-pack/scripts/codex_handoff_probe.py",
+                "--home",
+                str(home),
+                "--cwd",
+                str(parent),
+                "--include-text",
+                "--format",
+                "json",
+            )
+            self.assertEqual(scoped.returncode, 0, scoped.stderr)
+            data = json.loads(scoped.stdout)
+            self.assertEqual(
+                {row["session_id"] for row in data["sessions"]},
+                {"parent-exact"},
+            )
+            self.assertNotIn("child1 private marker", scoped.stdout)
+            self.assertNotIn("child2 private marker", scoped.stdout)
+
+            # Explicit --session-id still cannot pull a descendant git project
+            # when --cwd is a non-git parent (same gate as cross-repo).
+            explicit_child = self.run_cmd(
+                sys.executable,
+                "skills/context-handoff-pack/scripts/codex_handoff_probe.py",
+                "--home",
+                str(home),
+                "--cwd",
+                str(parent),
+                "--session-id",
+                "child1",
+                "--include-text",
+                "--format",
+                "json",
+            )
+            self.assertEqual(explicit_child.returncode, 0, explicit_child.stderr)
+            self.assertEqual(json.loads(explicit_child.stdout)["matching_sessions"], 0)
+            self.assertNotIn("child1 private marker", explicit_child.stdout)
+
+            # Opt-in works when --cwd matches the child project itself.
+            matched_child = self.run_cmd(
+                sys.executable,
+                "skills/context-handoff-pack/scripts/codex_handoff_probe.py",
+                "--home",
+                str(home),
+                "--cwd",
+                str(child1),
+                "--session-id",
+                "child1",
+                "--include-text",
+                "--format",
+                "json",
+            )
+            self.assertEqual(matched_child.returncode, 0, matched_child.stderr)
+            self.assertEqual(json.loads(matched_child.stdout)["sessions"][0]["session_id"], "child1")
+
+            # Unit-level: all vendored copies reject prefix matching.
+            for name, path in (
+                ("agent_patterns_scope", ROOT / "skills/agent-patterns/scripts/session_log_utils.py"),
+                ("handoff_scope", ROOT / "skills/context-handoff-pack/scripts/session_log_utils.py"),
+                ("miner_scope", ROOT / "skills/agent-session-pattern-miner/scripts/session_log_utils.py"),
+            ):
+                utils = self.load_module(name, path)
+                with self.subTest(module=name):
+                    self.assertFalse(utils.same_repository_scope(str(child1), str(parent)))
+                    self.assertFalse(utils.same_repository_scope(str(child2), str(parent)))
+                    self.assertTrue(utils.same_repository_scope(str(parent), str(parent)))
+                    self.assertTrue(utils.same_repository_scope(str(child1), str(child1)))
+                    self.assertTrue(utils.same_repository_scope(str(child1 / "nested"), str(child1)))
+
     def test_handoff_probe_excludes_unknown_and_other_cwd_by_default(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             home = Path(tmp)
