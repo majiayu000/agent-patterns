@@ -190,14 +190,14 @@ def same_repository_scope(session_cwd: str, requested_cwd: str) -> bool:
     try:
         session_path = Path(session_cwd).expanduser().resolve()
         requested_path = Path(requested_cwd).expanduser().resolve()
-    except OSError:
+    except (OSError, RuntimeError):
         return session_cwd == requested_cwd
     session_root = discover_git_root(session_path)
     requested_root = discover_git_root(requested_path)
     if session_root is not None and requested_root is not None:
         try:
             session_root, requested_root = common_git_dir(session_root), common_git_dir(requested_root)
-        except (OSError, ValueError):
+        except (OSError, RuntimeError, ValueError):
             # Damaged historical metadata must not widen scope or abort the probe.
             return session_root == requested_root
         return session_root == requested_root

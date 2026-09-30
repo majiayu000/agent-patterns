@@ -464,15 +464,19 @@ class AgentPatternsSkillTest(unittest.TestCase):
                     [{"type": "session_meta", "payload": {"id": sid, "cwd": str(cwd)}}],
                 )
             linked_git_dir = Path((linked / ".git").read_text().removeprefix("gitdir: ").rstrip("\r\n"))
+            loop = home / "symlink loop"
+            loop.symlink_to(loop)
             for metadata, cwd, contents in (
                 (damaged / ".git", damaged, b"not a gitdir pointer\n"),
                 (damaged / ".git", damaged, b"other: invalid\n"),
                 (damaged / ".git", damaged, b"gitdir: \n"),
                 (damaged / ".git", damaged, b"gitdir: \xff\n"),
                 (damaged / ".git", damaged, None),
+                (damaged / ".git", damaged, f"gitdir: {loop}\n".encode("utf-8")),
                 (linked_git_dir / "commondir", linked, b"\xff\n"),
                 (linked_git_dir / "commondir", linked, b"invalid\0path\n"),
                 (linked_git_dir / "commondir", linked, None),
+                (linked_git_dir / "commondir", linked, f"{loop}\n".encode("utf-8")),
             ):
                 with self.subTest(metadata=metadata, contents=contents):
                     original = metadata.read_bytes()
@@ -484,6 +488,16 @@ class AgentPatternsSkillTest(unittest.TestCase):
                                 self.skipTest("current user can read files without read permission")
                         else:
                             metadata.write_bytes(contents)
+                        for skill in ("agent-patterns", "context-handoff-pack", "agent-session-pattern-miner"):
+                            with self.subTest(skill=skill):
+                                utils = self.load_module(
+                                    f"{skill.replace('-', '_')}_damaged_git_utils",
+                                    ROOT / "skills" / skill / "scripts/session_log_utils.py",
+                                )
+                                self.assertFalse(utils.same_repository_scope(str(cwd), str(project)))
+                                self.assertFalse(utils.same_repository_scope(str(project), str(cwd)))
+                                self.assertTrue(utils.same_repository_scope(str(cwd / "nested"), str(cwd)))
+                                self.assertTrue(utils.same_repository_scope(str(cwd), str(cwd / "nested")))
                         result = self.run_cmd(
                             sys.executable,
                             "skills/context-handoff-pack/scripts/codex_handoff_probe.py",
@@ -495,18 +509,47 @@ class AgentPatternsSkillTest(unittest.TestCase):
                         )
                         self.assertNotIn("damaged private marker", result.stdout)
                         self.assertNotIn("linked private marker", result.stdout)
-                        for skill in ("agent-patterns", "context-handoff-pack", "agent-session-pattern-miner"):
-                            utils = self.load_module(
-                                f"{skill.replace('-', '_')}_damaged_git_utils",
-                                ROOT / "skills" / skill / "scripts/session_log_utils.py",
-                            )
-                            self.assertFalse(utils.same_repository_scope(str(cwd), str(project)))
-                            self.assertFalse(utils.same_repository_scope(str(project), str(cwd)))
-                            self.assertTrue(utils.same_repository_scope(str(cwd / "nested"), str(cwd)))
-                            self.assertTrue(utils.same_repository_scope(str(cwd), str(cwd / "nested")))
                     finally:
                         metadata.chmod(original_mode)
                         metadata.write_bytes(original)
+
+    def test_handoff_probe_tolerates_cyclic_historical_cwd(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp).resolve()
+            project = home / "project"
+            result = self.run_cmd("git", "init", str(project))
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            loop = home / "cyclic cwd"
+            loop.symlink_to(loop)
+            self.write_jsonl(
+                home / ".codex/history.jsonl",
+                [{"session_id": sid, "text": f"{sid} private marker", "ts": index}
+                 for index, sid in enumerate(("known", "cyclic"))],
+            )
+            for sid, cwd in (("known", project), ("cyclic", loop)):
+                self.write_jsonl(
+                    home / f".codex/sessions/rollout-{sid}.jsonl",
+                    [{"type": "session_meta", "payload": {"id": sid, "cwd": str(cwd)}}],
+                )
+            for skill in ("agent-patterns", "context-handoff-pack", "agent-session-pattern-miner"):
+                utils = self.load_module(
+                    f"{skill.replace('-', '_')}_cyclic_cwd_utils",
+                    ROOT / "skills" / skill / "scripts/session_log_utils.py",
+                )
+                for session_cwd, requested_cwd, expected in (
+                    (loop, project, False), (project, loop, False), (loop, loop, True),
+                ):
+                    with self.subTest(skill=skill, session_cwd=session_cwd, requested_cwd=requested_cwd):
+                        self.assertEqual(
+                            utils.same_repository_scope(str(session_cwd), str(requested_cwd)), expected,
+                        )
+            result = self.run_cmd(
+                sys.executable, "skills/context-handoff-pack/scripts/codex_handoff_probe.py",
+                "--home", str(home), "--cwd", str(project), "--include-text", "--format", "json",
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual({row["session_id"] for row in json.loads(result.stdout)["sessions"]}, {"known"})
+            self.assertNotIn("cyclic private marker", result.stdout)
 
     def test_handoff_probe_preserves_git_directory_trailing_spaces(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
