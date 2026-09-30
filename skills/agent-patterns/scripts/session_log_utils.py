@@ -196,6 +196,8 @@ def same_repository_scope(session_cwd: str, requested_cwd: str) -> bool:
     session_root = discover_git_root(session_path)
     requested_root = discover_git_root(requested_path)
     if session_root is not None and requested_root is not None:
+        session_root = common_git_dir(session_root)
+        requested_root = common_git_dir(requested_root)
         return session_root == requested_root
     return session_path == requested_path or session_path.is_relative_to(requested_path)
 
@@ -205,6 +207,19 @@ def discover_git_root(path: Path) -> Path | None:
         if (candidate / ".git").exists():
             return candidate
     return None
+
+
+def common_git_dir(root: Path) -> Path:
+    git_dir = root / ".git"
+    if git_dir.is_file():
+        prefix, git_dir_path = git_dir.read_text(encoding="utf-8").strip().split(":", 1)
+        if prefix != "gitdir" or not git_dir_path.strip():
+            raise ValueError(f"Invalid gitdir file: {git_dir}")
+        git_dir = root / git_dir_path.strip()
+    commondir = git_dir / "commondir"
+    if commondir.is_file():
+        git_dir = git_dir / commondir.read_text(encoding="utf-8").strip()
+    return git_dir.resolve()
 
 
 def utc_iso_from_timestamp(value: Any) -> str:

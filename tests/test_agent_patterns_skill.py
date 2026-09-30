@@ -352,6 +352,86 @@ class AgentPatternsSkillTest(unittest.TestCase):
             self.assertEqual(cross_data["sessions"][0]["session_id"], "other")
             self.assertIn("other private marker", cross_repository.stdout)
 
+    def test_handoff_probe_matches_linked_worktree_repository(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp).resolve()
+            project = home / "main checkout"
+            worktree = home / "linked checkout"
+            other = home / "other checkout"
+            for command in (
+                ("git", "init", str(project)),
+                (
+                    "git", "-C", str(project), "-c", "user.name=Test",
+                    "-c", "user.email=tests@example.invalid", "-c", "commit.gpgsign=false",
+                    "commit", "--allow-empty", "-m", "initial",
+                ),
+                ("git", "-C", str(project), "worktree", "add", "--detach", str(worktree), "HEAD"),
+                ("git", "init", "--separate-git-dir", str(home / "other.git"), str(other)),
+            ):
+                result = self.run_cmd(*command)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            nested = worktree / "nested"
+            nested.mkdir()
+            self.write_jsonl(
+                home / ".codex/history.jsonl",
+                [
+                    {"session_id": sid, "text": f"{sid} repository marker", "ts": index}
+                    for index, sid in enumerate(("main", "linked", "other"))
+                ],
+            )
+            for sid, cwd in (("main", project), ("linked", worktree), ("other", other)):
+                self.write_jsonl(
+                    home / f".codex/sessions/rollout-{sid}.jsonl",
+                    [{"type": "session_meta", "payload": {"id": sid, "cwd": str(cwd)}}],
+                )
+            for cwd in (project, worktree, nested):
+                with self.subTest(probe_cwd=cwd):
+                    result = self.run_cmd(
+                        sys.executable,
+                        "skills/context-handoff-pack/scripts/codex_handoff_probe.py",
+                        "--home", str(home), "--cwd", str(cwd), "--include-text", "--format", "json",
+                    )
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    data = json.loads(result.stdout)
+                    self.assertEqual(data["matching_sessions"], 2)
+                    self.assertEqual(
+                        {row["session_id"] for row in data["sessions"]}, {"main", "linked"},
+                    )
+                    self.assertNotIn("other repository marker", result.stdout)
+                    self.assertNotIn("rollout-other.jsonl", result.stdout)
+
+            git_dir = Path((worktree / ".git").read_text().removeprefix("gitdir: ").strip())
+            for pointer_style in ("generated", "relative_gitdir", "absolute_commondir"):
+                if pointer_style == "relative_gitdir":
+                    (worktree / ".git").write_text(
+                        f"gitdir: {os.path.relpath(git_dir, worktree)}\n", encoding="utf-8",
+                    )
+                elif pointer_style == "absolute_commondir":
+                    (git_dir / "commondir").write_text(str(project / ".git") + "\n", encoding="utf-8")
+                for skill in ("agent-patterns", "context-handoff-pack", "agent-session-pattern-miner"):
+                    utils = self.load_module(
+                        f"{skill.replace('-', '_')}_worktree_utils",
+                        ROOT / "skills" / skill / "scripts/session_log_utils.py",
+                    )
+                    for session_cwd, requested_cwd, expected in (
+                        (project, worktree, True),
+                        (worktree, project, True),
+                        (project, nested, True),
+                        (nested, project, True),
+                        (other, project, False),
+                        (project, other, False),
+                        (other, worktree, False),
+                        (worktree, other, False),
+                        (other, other, True),
+                    ):
+                        with self.subTest(
+                            skill=skill, pointer_style=pointer_style,
+                            session_cwd=session_cwd, requested_cwd=requested_cwd,
+                        ):
+                            self.assertEqual(
+                                utils.same_repository_scope(str(session_cwd), str(requested_cwd)), expected,
+                            )
+
     def test_jsonl_readers_tolerate_malformed_scalars_arrays_and_null(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             home = Path(tmp)
