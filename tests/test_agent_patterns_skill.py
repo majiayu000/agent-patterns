@@ -259,6 +259,41 @@ class AgentPatternsSkillTest(unittest.TestCase):
         self.assertNotIn("sk-", excerpt)
         self.assertIn("[REDACTED]", excerpt)
 
+    def test_repository_scope_requires_exact_non_git_cwd(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            project = workspace / "repo"
+            child = project / "nested"
+            other = workspace / "other"
+            non_git_child = workspace / "plain"
+            child.mkdir(parents=True)
+            other.mkdir()
+            non_git_child.mkdir()
+            (project / ".git").mkdir()
+            (other / ".git").mkdir()
+            cases = (
+                (workspace, workspace, True),
+                (workspace / "plain/..", workspace, True),
+                (non_git_child, workspace, False),
+                (project, workspace, False),
+                (other, workspace, False),
+                (workspace, project, False),
+                (project, child, True),
+                (child, project, True),
+                (other, child, False),
+            )
+            for skill in ("agent-patterns", "context-handoff-pack", "agent-session-pattern-miner"):
+                utils = self.load_module(
+                    f"{skill.replace('-', '_')}_scope_utils",
+                    ROOT / "skills" / skill / "scripts/session_log_utils.py",
+                )
+                for session_cwd, requested_cwd, expected in cases:
+                    with self.subTest(skill=skill, session_cwd=session_cwd, requested_cwd=requested_cwd):
+                        self.assertEqual(
+                            utils.same_repository_scope(str(session_cwd), str(requested_cwd)),
+                            expected,
+                        )
+
     def test_handoff_probe_excludes_unknown_and_other_cwd_by_default(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             home = Path(tmp)
@@ -297,25 +332,36 @@ class AgentPatternsSkillTest(unittest.TestCase):
                 [{"type": "session_meta", "payload": {"id": "child", "cwd": str(child)}}],
             )
 
-            scoped = self.run_cmd(
-                sys.executable,
-                "skills/context-handoff-pack/scripts/codex_handoff_probe.py",
-                "--home",
-                str(home),
-                "--cwd",
-                str(project),
-                "--include-text",
-                "--format",
-                "json",
-            )
-            self.assertEqual(scoped.returncode, 0, scoped.stderr)
-            self.assertEqual(
-                {row["session_id"] for row in json.loads(scoped.stdout)["sessions"]},
-                {"known", "child"},
-            )
-            self.assertNotIn("unknown private marker", scoped.stdout)
-            self.assertNotIn("other private marker", scoped.stdout)
-            self.assertNotIn("parent workspace private marker", scoped.stdout)
+            for cwd, expected in (
+                (project, {"known", "child"}),
+                (child, {"known", "child"}),
+                (project.parent, {"parent"}),
+            ):
+                with self.subTest(cwd=cwd):
+                    scoped = self.run_cmd(
+                        sys.executable,
+                        "skills/context-handoff-pack/scripts/codex_handoff_probe.py",
+                        "--home",
+                        str(home),
+                        "--cwd",
+                        str(cwd),
+                        "--include-text",
+                        "--format",
+                        "json",
+                    )
+                    self.assertEqual(scoped.returncode, 0, scoped.stderr)
+                    data = json.loads(scoped.stdout)
+                    self.assertEqual(data["matching_sessions"], len(expected))
+                    self.assertEqual({row["session_id"] for row in data["sessions"]}, expected)
+                    self.assertNotIn("unknown private marker", scoped.stdout)
+                    self.assertNotIn("other private marker", scoped.stdout)
+                    if cwd == project.parent:
+                        for excluded in ("known", "child", "other"):
+                            self.assertNotIn(f"rollout-{excluded}.jsonl", scoped.stdout)
+                        self.assertNotIn("known project marker", scoped.stdout)
+                        self.assertNotIn("child project marker", scoped.stdout)
+                    else:
+                        self.assertNotIn("parent workspace private marker", scoped.stdout)
 
             explicit = self.run_cmd(
                 sys.executable,
