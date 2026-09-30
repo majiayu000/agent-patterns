@@ -1,6 +1,32 @@
 # Agent Patterns Skill Pack
 
-This workspace now models Agent Patterns as skills, not as a standalone hardcoded product script.
+Reusable workflow skills for Codex and Claude Code, covering PR review, CI
+diagnosis, context handoff, session-history mining, and human review gates.
+Use them to carry evidence, scope, failure handling, and verification through
+repeatable coding-agent work.
+
+Each skill keeps its workflow in `SKILL.md`, with bundled scripts and references
+where needed. This repository is a skill pack; it does not run an agent service.
+
+## Quick start
+
+```sh
+git clone https://github.com/majiayu000/agent-patterns.git
+cd agent-patterns
+python3 skills/agent-patterns/scripts/pattern_tool.py list
+python3 skills/agent-patterns/scripts/pattern_tool.py search "pr review"
+```
+
+Read the selected skill's `SKILL.md` before using it. To install a skill, copy
+its whole folder into your host's configured skill directory, preserving its
+`scripts/` and `references/` resources. Invoke it through that host's skill
+interface; the listing helper itself does not execute the workflow.
+
+Start with [PR review](skills/pr-review-risk-plan/SKILL.md),
+[CI failure diagnosis](skills/ci-failure-diagnosis/SKILL.md), or
+[context handoff](skills/context-handoff-pack/SKILL.md).
+See the [meta skill](skills/agent-patterns/SKILL.md) for the pattern contract and
+[Spellbook mapping](docs/spellbook-mapping.md) for porting notes.
 
 ## Skills
 
