@@ -432,6 +432,134 @@ class AgentPatternsSkillTest(unittest.TestCase):
                                 utils.same_repository_scope(str(session_cwd), str(requested_cwd)), expected,
                             )
 
+    def test_handoff_probe_tolerates_damaged_historical_git_metadata(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp).resolve()
+            project = home / "project"
+            damaged = project / "damaged checkout"
+            linked = project / "damaged linked checkout"
+            for command in (
+                ("git", "init", str(project)),
+                ("git", "init", "--separate-git-dir", str(home / "damaged.git"), str(damaged)),
+                (
+                    "git", "-C", str(damaged), "-c", "user.name=Test",
+                    "-c", "user.email=tests@example.invalid", "-c", "commit.gpgsign=false",
+                    "commit", "--allow-empty", "-m", "initial",
+                ),
+                ("git", "-C", str(damaged), "worktree", "add", "--detach", str(linked), "HEAD"),
+            ):
+                result = self.run_cmd(*command)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.write_jsonl(
+                home / ".codex/history.jsonl",
+                [
+                    {"session_id": sid, "text": f"{sid} private marker", "ts": index}
+                    for index, sid in enumerate(("known", "damaged", "linked"))
+                ],
+            )
+            for sid, cwd in (("known", project), ("damaged", damaged), ("linked", linked)):
+                (cwd / "nested").mkdir()
+                self.write_jsonl(
+                    home / f".codex/sessions/rollout-{sid}.jsonl",
+                    [{"type": "session_meta", "payload": {"id": sid, "cwd": str(cwd)}}],
+                )
+            linked_git_dir = Path((linked / ".git").read_text().removeprefix("gitdir: ").rstrip("\r\n"))
+            for metadata, cwd, contents in (
+                (damaged / ".git", damaged, b"not a gitdir pointer\n"),
+                (damaged / ".git", damaged, b"other: invalid\n"),
+                (damaged / ".git", damaged, b"gitdir: \n"),
+                (damaged / ".git", damaged, b"gitdir: \xff\n"),
+                (damaged / ".git", damaged, None),
+                (linked_git_dir / "commondir", linked, b"\xff\n"),
+                (linked_git_dir / "commondir", linked, b"invalid\0path\n"),
+                (linked_git_dir / "commondir", linked, None),
+            ):
+                with self.subTest(metadata=metadata, contents=contents):
+                    original = metadata.read_bytes()
+                    original_mode = metadata.stat().st_mode
+                    try:
+                        if contents is None:
+                            metadata.chmod(0)
+                            if os.access(metadata, os.R_OK):
+                                self.skipTest("current user can read files without read permission")
+                        else:
+                            metadata.write_bytes(contents)
+                        result = self.run_cmd(
+                            sys.executable,
+                            "skills/context-handoff-pack/scripts/codex_handoff_probe.py",
+                            "--home", str(home), "--cwd", str(project), "--include-text", "--format", "json",
+                        )
+                        self.assertEqual(result.returncode, 0, result.stderr)
+                        self.assertEqual(
+                            {row["session_id"] for row in json.loads(result.stdout)["sessions"]}, {"known"},
+                        )
+                        self.assertNotIn("damaged private marker", result.stdout)
+                        self.assertNotIn("linked private marker", result.stdout)
+                        for skill in ("agent-patterns", "context-handoff-pack", "agent-session-pattern-miner"):
+                            utils = self.load_module(
+                                f"{skill.replace('-', '_')}_damaged_git_utils",
+                                ROOT / "skills" / skill / "scripts/session_log_utils.py",
+                            )
+                            self.assertFalse(utils.same_repository_scope(str(cwd), str(project)))
+                            self.assertFalse(utils.same_repository_scope(str(project), str(cwd)))
+                            self.assertTrue(utils.same_repository_scope(str(cwd / "nested"), str(cwd)))
+                            self.assertTrue(utils.same_repository_scope(str(cwd), str(cwd / "nested")))
+                    finally:
+                        metadata.chmod(original_mode)
+                        metadata.write_bytes(original)
+
+    def test_handoff_probe_preserves_git_directory_trailing_spaces(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp).resolve()
+            project = home / "main checkout"
+            worktree = home / "linked checkout"
+            git_dir = home / "repository.git "
+            for command in (
+                ("git", "init", "--separate-git-dir", str(git_dir), str(project)),
+                (
+                    "git", "-C", str(project), "-c", "user.name=Test",
+                    "-c", "user.email=tests@example.invalid", "-c", "commit.gpgsign=false",
+                    "commit", "--allow-empty", "-m", "initial",
+                ),
+                ("git", "-C", str(project), "worktree", "add", "--detach", str(worktree), "HEAD"),
+            ):
+                result = self.run_cmd(*command)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.write_jsonl(
+                home / ".codex/history.jsonl",
+                [{"session_id": sid, "text": "continue", "ts": index} for index, sid in enumerate(("main", "linked"))],
+            )
+            for sid, cwd in (("main", project), ("linked", worktree)):
+                self.write_jsonl(
+                    home / f".codex/sessions/rollout-{sid}.jsonl",
+                    [{"type": "session_meta", "payload": {"id": sid, "cwd": str(cwd)}}],
+                )
+            linked_git_dir = Path((worktree / ".git").read_text().removeprefix("gitdir: ").rstrip("\r\n"))
+            for pointer_style in ("generated", "absolute_commondir"):
+                if pointer_style == "absolute_commondir":
+                    (linked_git_dir / "commondir").write_text(str(git_dir) + "\n", encoding="utf-8")
+                for cwd, other in ((project, worktree), (worktree, project)):
+                    with self.subTest(pointer_style=pointer_style, cwd=cwd):
+                        git_result = self.run_cmd("git", "-C", str(cwd), "rev-parse", "--git-common-dir")
+                        self.assertEqual(git_result.returncode, 0, git_result.stderr)
+                        self.assertEqual((cwd / git_result.stdout.rstrip("\r\n")).resolve(), git_dir)
+                        result = self.run_cmd(
+                            sys.executable,
+                            "skills/context-handoff-pack/scripts/codex_handoff_probe.py",
+                            "--home", str(home), "--cwd", str(cwd), "--format", "json",
+                        )
+                        self.assertEqual(result.returncode, 0, result.stderr)
+                        self.assertEqual(
+                            {row["session_id"] for row in json.loads(result.stdout)["sessions"]}, {"main", "linked"},
+                        )
+                        for skill in ("agent-patterns", "context-handoff-pack", "agent-session-pattern-miner"):
+                            utils = self.load_module(
+                                f"{skill.replace('-', '_')}_trailing_space_utils",
+                                ROOT / "skills" / skill / "scripts/session_log_utils.py",
+                            )
+                            self.assertEqual(utils.common_git_dir(cwd), git_dir)
+                            self.assertTrue(utils.same_repository_scope(str(cwd), str(other)))
+
     def test_jsonl_readers_tolerate_malformed_scalars_arrays_and_null(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             home = Path(tmp)
