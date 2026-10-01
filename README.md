@@ -28,6 +28,38 @@ Start with [PR review](skills/pr-review-risk-plan/SKILL.md),
 See the [meta skill](skills/agent-patterns/SKILL.md) for the pattern contract and
 [Spellbook mapping](docs/spellbook-mapping.md) for porting notes.
 
+## Choose a skill for the problem
+
+| Your task | Start with | Bring this evidence |
+| --- | --- | --- |
+| Review a PR before changing or merging it | [PR Review Risk Plan](skills/pr-review-risk-plan/SKILL.md) | PR URL or local diff, base/head, intended behavior, and relevant checks |
+| Explain a red CI run before proposing a fix | [CI Failure Diagnosis](skills/ci-failure-diagnosis/SKILL.md) | Run URL, failing job/command, exact commit, and available logs |
+| Resume after compaction or hand work to another agent | [Context Handoff Pack](skills/context-handoff-pack/SKILL.md) | Repo path, current goal, changed files, decisions, verification, and one next action |
+| Require a human decision before changes land | [Review Gate](skills/review-gate/SKILL.md) | Proposed diff, risks, verification, and the exact action requiring approval |
+
+After installing the whole skill folder, select it through your host's skill
+interface and give it a concrete request, for example:
+
+> Use CI Failure Diagnosis for this run: `<run URL>`. The repository is
+> `<repo path>` and the failing head is `<commit SHA>`. Read the failing job
+> evidence, identify the smallest defensible cause, and report which checks you
+> completed before proposing a fix.
+
+For a handoff, use Context Handoff Pack with the exact repository path and goal.
+Its local-history probe can help find session evidence; historical logs remain
+hints until current Git, runtime, and test state are verified. You can use it
+with live workspace evidence when local history is unavailable.
+
+`pattern_tool.py search` finds manifest metadata. It does not invoke an agent,
+execute the selected workflow, grant approval, or prove a fix works. This is
+**majiayu000/agent-patterns**, a workflow skill pack; each linked `SKILL.md`
+defines its own evidence and failure contract.
+
+For a reproducible script or packaging problem, open a
+[repository issue](https://github.com/majiayu000/agent-patterns/issues) with the
+skill, command, version or commit, and redacted error. See [LICENSE](LICENSE)
+for reuse terms.
+
 ## Skills
 
 - `skills/agent-patterns`: meta skill for creating, auditing, validating, and packaging executable workflow patterns.
