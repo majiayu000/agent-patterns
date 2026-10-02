@@ -12,6 +12,14 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
+PROVIDER_SECRET_CANARIES = (
+    "sk_" + "live_" + "A1" * 12,
+    "sk_" + "test_" + "B2" * 12,
+    "rk_" + "live_" + "C3" * 12,
+    "rk_" + "test_" + "D4" * 12,
+    "AIza" + "G7" * 17 + "-",
+    "AIza" + "H8" * 17 + "_",
+)
 QUICK_VALIDATE = Path(
     os.environ.get(
         "SKILL_CREATOR_QUICK_VALIDATE",
@@ -64,7 +72,7 @@ class AgentPatternsSkillTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             home = Path(tmp)
             aws_canary = "AKIAIOSFODNN7EXAMPLE"
-            project = home / "work" / aws_canary / "repo"
+            project = home / "work" / aws_canary / Path(*PROVIDER_SECRET_CANARIES) / "repo"
             project.mkdir(parents=True)
             self.write_jsonl(
                 home / ".codex/history.jsonl",
@@ -113,6 +121,9 @@ class AgentPatternsSkillTest(unittest.TestCase):
             self.assertIn("agent-session-pattern-miner", candidate_ids)
             self.assertIn("context-handoff-pack", candidate_ids)
             self.assertNotIn(aws_canary, result.stdout)
+            self.assertEqual(data["top_projects"][0]["project"].count("[REDACTED]"), len(PROVIDER_SECRET_CANARIES) + 1)
+            for secret in PROVIDER_SECRET_CANARIES:
+                self.assertNotIn(secret, result.stdout)
 
     def test_codex_handoff_probe_with_local_fixtures(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -126,7 +137,7 @@ class AgentPatternsSkillTest(unittest.TestCase):
                 [
                     {
                         "session_id": "codex-1",
-                        "text": "continue and run pytest before publish",
+                        "text": "continue and run pytest before publish " + " ".join(PROVIDER_SECRET_CANARIES),
                         "ts": jwt_canary,
                     }
                 ],
@@ -159,6 +170,27 @@ class AgentPatternsSkillTest(unittest.TestCase):
             self.assertNotIn(aws_canary, result.stdout)
             self.assertNotIn(jwt_canary, result.stdout)
 
+            for output_format in ("json", "text"):
+                with self.subTest(output_format=output_format):
+                    result = self.run_cmd(
+                        sys.executable,
+                        "skills/context-handoff-pack/scripts/codex_handoff_probe.py",
+                        "--home",
+                        str(home),
+                        "--cwd",
+                        str(project),
+                        "--format",
+                        output_format,
+                        "--include-text",
+                    )
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertIn("[REDACTED]", result.stdout)
+                    for secret in PROVIDER_SECRET_CANARIES:
+                        self.assertNotIn(secret, result.stdout)
+                    if output_format == "json":
+                        excerpt = json.loads(result.stdout)["sessions"][0]["recent"][0]["text"]
+                        self.assertEqual(excerpt.count("[REDACTED]"), len(PROVIDER_SECRET_CANARIES))
+
     def test_secret_redaction_covers_structured_and_text_corpus(self) -> None:
         secrets = {
             "api": "top-level-api-secret-value",
@@ -174,6 +206,7 @@ class AgentPatternsSkillTest(unittest.TestCase):
             "gitlab_pat": "glpat-abcdefghijklmnopqrstuvwxyz123456",
             "slack_token": "xox" + "b-123456789012-abcdefghijklmnopqrstuvwxyz",
         }
+        secrets.update({f"provider_{index}": secret for index, secret in enumerate(PROVIDER_SECRET_CANARIES)})
         text = json.dumps(
             {
                 "api_key": secrets["api"],
@@ -188,6 +221,8 @@ class AgentPatternsSkillTest(unittest.TestCase):
             f"\nCookie: session={secrets['cookie']}; HttpOnly"
             f"\n-----BEGIN PRIVATE KEY-----\n{secrets['pem_body']}\n-----END PRIVATE KEY-----"
             f"\nGitHub={secrets['github_pat']} GitLab={secrets['gitlab_pat']} Slack={secrets['slack_token']}"
+            f"\nBare={' '.join(PROVIDER_SECRET_CANARIES)}"
+            f"\nSTRIPE_KEY={PROVIDER_SECRET_CANARIES[0]}"
         )
 
         modules = [
@@ -211,6 +246,8 @@ class AgentPatternsSkillTest(unittest.TestCase):
                     self.assertNotIn(secret, redacted)
                 self.assertGreaterEqual(redacted.count("[REDACTED]"), 4)
                 self.assertEqual(utils.redact_secret_like_values(redacted), redacted)
+                for secret in PROVIDER_SECRET_CANARIES:
+                    self.assertEqual(utils.redact_secret_like_values(f"/workspace/{secret}/repo"), "/workspace/[REDACTED]/repo")
 
                 output = utils.sanitize_output(
                     {
