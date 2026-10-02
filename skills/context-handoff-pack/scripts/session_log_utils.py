@@ -193,11 +193,16 @@ def same_repository_scope(session_cwd: str, requested_cwd: str) -> bool:
     try:
         session_path = Path(session_cwd).expanduser().resolve()
         requested_path = Path(requested_cwd).expanduser().resolve()
-    except OSError:
+    except (OSError, RuntimeError):
         return session_cwd == requested_cwd
     session_root = discover_git_root(session_path)
     requested_root = discover_git_root(requested_path)
     if session_root is not None and requested_root is not None:
+        try:
+            session_root, requested_root = common_git_dir(session_root), common_git_dir(requested_root)
+        except (OSError, RuntimeError, ValueError):
+            # Damaged historical metadata must not widen scope or abort the probe.
+            return session_root == requested_root
         return session_root == requested_root
     return session_path == requested_path
 
@@ -207,6 +212,19 @@ def discover_git_root(path: Path) -> Path | None:
         if (candidate / ".git").exists():
             return candidate
     return None
+
+
+def common_git_dir(root: Path) -> Path:
+    git_dir = root / ".git"
+    if git_dir.is_file():
+        prefix, git_dir_path = git_dir.read_text(encoding="utf-8").rstrip("\r\n").split(": ", 1)
+        if prefix != "gitdir" or not git_dir_path:
+            raise ValueError(f"Invalid gitdir file: {git_dir}")
+        git_dir = root / git_dir_path
+    commondir = git_dir / "commondir"
+    if commondir.is_file():
+        git_dir = git_dir / commondir.read_text(encoding="utf-8").rstrip("\r\n")
+    return git_dir.resolve()
 
 
 def utc_iso_from_timestamp(value: Any) -> str:

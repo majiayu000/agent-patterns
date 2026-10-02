@@ -435,6 +435,257 @@ class AgentPatternsSkillTest(unittest.TestCase):
             self.assertEqual(cross_data["sessions"][0]["session_id"], "other")
             self.assertIn("other private marker", cross_repository.stdout)
 
+    def test_handoff_probe_matches_linked_worktree_repository(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp).resolve()
+            project = home / "main checkout"
+            worktree = home / "linked checkout"
+            other = home / "other checkout"
+            for command in (
+                ("git", "init", str(project)),
+                (
+                    "git", "-C", str(project), "-c", "user.name=Test",
+                    "-c", "user.email=tests@example.invalid", "-c", "commit.gpgsign=false",
+                    "commit", "--allow-empty", "-m", "initial",
+                ),
+                ("git", "-C", str(project), "worktree", "add", "--detach", str(worktree), "HEAD"),
+                ("git", "init", "--separate-git-dir", str(home / "other.git"), str(other)),
+            ):
+                result = self.run_cmd(*command)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            nested = worktree / "nested"
+            nested.mkdir()
+            self.write_jsonl(
+                home / ".codex/history.jsonl",
+                [
+                    {"session_id": sid, "text": f"{sid} repository marker", "ts": index}
+                    for index, sid in enumerate(("main", "linked", "other"))
+                ],
+            )
+            for sid, cwd in (("main", project), ("linked", worktree), ("other", other)):
+                self.write_jsonl(
+                    home / f".codex/sessions/rollout-{sid}.jsonl",
+                    [{"type": "session_meta", "payload": {"id": sid, "cwd": str(cwd)}}],
+                )
+            for cwd in (project, worktree, nested):
+                with self.subTest(probe_cwd=cwd):
+                    result = self.run_cmd(
+                        sys.executable,
+                        "skills/context-handoff-pack/scripts/codex_handoff_probe.py",
+                        "--home", str(home), "--cwd", str(cwd), "--include-text", "--format", "json",
+                    )
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    data = json.loads(result.stdout)
+                    self.assertEqual(data["matching_sessions"], 2)
+                    self.assertEqual(
+                        {row["session_id"] for row in data["sessions"]}, {"main", "linked"},
+                    )
+                    self.assertNotIn("other repository marker", result.stdout)
+                    self.assertNotIn("rollout-other.jsonl", result.stdout)
+
+            git_dir = Path((worktree / ".git").read_text().removeprefix("gitdir: ").strip())
+            for pointer_style in ("generated", "relative_gitdir", "absolute_commondir"):
+                if pointer_style == "relative_gitdir":
+                    (worktree / ".git").write_text(
+                        f"gitdir: {os.path.relpath(git_dir, worktree)}\n", encoding="utf-8",
+                    )
+                elif pointer_style == "absolute_commondir":
+                    (git_dir / "commondir").write_text(str(project / ".git") + "\n", encoding="utf-8")
+                for skill in ("agent-patterns", "context-handoff-pack", "agent-session-pattern-miner"):
+                    utils = self.load_module(
+                        f"{skill.replace('-', '_')}_worktree_utils",
+                        ROOT / "skills" / skill / "scripts/session_log_utils.py",
+                    )
+                    for session_cwd, requested_cwd, expected in (
+                        (project, worktree, True),
+                        (worktree, project, True),
+                        (project, nested, True),
+                        (nested, project, True),
+                        (other, project, False),
+                        (project, other, False),
+                        (other, worktree, False),
+                        (worktree, other, False),
+                        (other, other, True),
+                    ):
+                        with self.subTest(
+                            skill=skill, pointer_style=pointer_style,
+                            session_cwd=session_cwd, requested_cwd=requested_cwd,
+                        ):
+                            self.assertEqual(
+                                utils.same_repository_scope(str(session_cwd), str(requested_cwd)), expected,
+                            )
+
+    def test_handoff_probe_tolerates_damaged_historical_git_metadata(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp).resolve()
+            project = home / "project"
+            damaged = project / "damaged checkout"
+            linked = project / "damaged linked checkout"
+            for command in (
+                ("git", "init", str(project)),
+                ("git", "init", "--separate-git-dir", str(home / "damaged.git"), str(damaged)),
+                (
+                    "git", "-C", str(damaged), "-c", "user.name=Test",
+                    "-c", "user.email=tests@example.invalid", "-c", "commit.gpgsign=false",
+                    "commit", "--allow-empty", "-m", "initial",
+                ),
+                ("git", "-C", str(damaged), "worktree", "add", "--detach", str(linked), "HEAD"),
+            ):
+                result = self.run_cmd(*command)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.write_jsonl(
+                home / ".codex/history.jsonl",
+                [
+                    {"session_id": sid, "text": f"{sid} private marker", "ts": index}
+                    for index, sid in enumerate(("known", "damaged", "linked"))
+                ],
+            )
+            for sid, cwd in (("known", project), ("damaged", damaged), ("linked", linked)):
+                (cwd / "nested").mkdir()
+                self.write_jsonl(
+                    home / f".codex/sessions/rollout-{sid}.jsonl",
+                    [{"type": "session_meta", "payload": {"id": sid, "cwd": str(cwd)}}],
+                )
+            linked_git_dir = Path((linked / ".git").read_text().removeprefix("gitdir: ").rstrip("\r\n"))
+            loop = home / "symlink loop"
+            loop.symlink_to(loop)
+            for metadata, cwd, contents in (
+                (damaged / ".git", damaged, b"not a gitdir pointer\n"),
+                (damaged / ".git", damaged, b"other: invalid\n"),
+                (damaged / ".git", damaged, b"gitdir: \n"),
+                (damaged / ".git", damaged, b"gitdir: \xff\n"),
+                (damaged / ".git", damaged, None),
+                (damaged / ".git", damaged, f"gitdir: {loop}\n".encode("utf-8")),
+                (linked_git_dir / "commondir", linked, b"\xff\n"),
+                (linked_git_dir / "commondir", linked, b"invalid\0path\n"),
+                (linked_git_dir / "commondir", linked, None),
+                (linked_git_dir / "commondir", linked, f"{loop}\n".encode("utf-8")),
+            ):
+                with self.subTest(metadata=metadata, contents=contents):
+                    original = metadata.read_bytes()
+                    original_mode = metadata.stat().st_mode
+                    try:
+                        if contents is None:
+                            metadata.chmod(0)
+                            if os.access(metadata, os.R_OK):
+                                self.skipTest("current user can read files without read permission")
+                        else:
+                            metadata.write_bytes(contents)
+                        for skill in ("agent-patterns", "context-handoff-pack", "agent-session-pattern-miner"):
+                            with self.subTest(skill=skill):
+                                utils = self.load_module(
+                                    f"{skill.replace('-', '_')}_damaged_git_utils",
+                                    ROOT / "skills" / skill / "scripts/session_log_utils.py",
+                                )
+                                self.assertFalse(utils.same_repository_scope(str(cwd), str(project)))
+                                self.assertFalse(utils.same_repository_scope(str(project), str(cwd)))
+                                self.assertTrue(utils.same_repository_scope(str(cwd / "nested"), str(cwd)))
+                                self.assertTrue(utils.same_repository_scope(str(cwd), str(cwd / "nested")))
+                        result = self.run_cmd(
+                            sys.executable,
+                            "skills/context-handoff-pack/scripts/codex_handoff_probe.py",
+                            "--home", str(home), "--cwd", str(project), "--include-text", "--format", "json",
+                        )
+                        self.assertEqual(result.returncode, 0, result.stderr)
+                        self.assertEqual(
+                            {row["session_id"] for row in json.loads(result.stdout)["sessions"]}, {"known"},
+                        )
+                        self.assertNotIn("damaged private marker", result.stdout)
+                        self.assertNotIn("linked private marker", result.stdout)
+                    finally:
+                        metadata.chmod(original_mode)
+                        metadata.write_bytes(original)
+
+    def test_handoff_probe_tolerates_cyclic_historical_cwd(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp).resolve()
+            project = home / "project"
+            result = self.run_cmd("git", "init", str(project))
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            loop = home / "cyclic cwd"
+            loop.symlink_to(loop)
+            self.write_jsonl(
+                home / ".codex/history.jsonl",
+                [{"session_id": sid, "text": f"{sid} private marker", "ts": index}
+                 for index, sid in enumerate(("known", "cyclic"))],
+            )
+            for sid, cwd in (("known", project), ("cyclic", loop)):
+                self.write_jsonl(
+                    home / f".codex/sessions/rollout-{sid}.jsonl",
+                    [{"type": "session_meta", "payload": {"id": sid, "cwd": str(cwd)}}],
+                )
+            for skill in ("agent-patterns", "context-handoff-pack", "agent-session-pattern-miner"):
+                utils = self.load_module(
+                    f"{skill.replace('-', '_')}_cyclic_cwd_utils",
+                    ROOT / "skills" / skill / "scripts/session_log_utils.py",
+                )
+                for session_cwd, requested_cwd, expected in (
+                    (loop, project, False), (project, loop, False), (loop, loop, True),
+                ):
+                    with self.subTest(skill=skill, session_cwd=session_cwd, requested_cwd=requested_cwd):
+                        self.assertEqual(
+                            utils.same_repository_scope(str(session_cwd), str(requested_cwd)), expected,
+                        )
+            result = self.run_cmd(
+                sys.executable, "skills/context-handoff-pack/scripts/codex_handoff_probe.py",
+                "--home", str(home), "--cwd", str(project), "--include-text", "--format", "json",
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual({row["session_id"] for row in json.loads(result.stdout)["sessions"]}, {"known"})
+            self.assertNotIn("cyclic private marker", result.stdout)
+
+    def test_handoff_probe_preserves_git_directory_trailing_spaces(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp).resolve()
+            project = home / "main checkout"
+            worktree = home / "linked checkout"
+            git_dir = home / "repository.git "
+            for command in (
+                ("git", "init", "--separate-git-dir", str(git_dir), str(project)),
+                (
+                    "git", "-C", str(project), "-c", "user.name=Test",
+                    "-c", "user.email=tests@example.invalid", "-c", "commit.gpgsign=false",
+                    "commit", "--allow-empty", "-m", "initial",
+                ),
+                ("git", "-C", str(project), "worktree", "add", "--detach", str(worktree), "HEAD"),
+            ):
+                result = self.run_cmd(*command)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.write_jsonl(
+                home / ".codex/history.jsonl",
+                [{"session_id": sid, "text": "continue", "ts": index} for index, sid in enumerate(("main", "linked"))],
+            )
+            for sid, cwd in (("main", project), ("linked", worktree)):
+                self.write_jsonl(
+                    home / f".codex/sessions/rollout-{sid}.jsonl",
+                    [{"type": "session_meta", "payload": {"id": sid, "cwd": str(cwd)}}],
+                )
+            linked_git_dir = Path((worktree / ".git").read_text().removeprefix("gitdir: ").rstrip("\r\n"))
+            for pointer_style in ("generated", "absolute_commondir"):
+                if pointer_style == "absolute_commondir":
+                    (linked_git_dir / "commondir").write_text(str(git_dir) + "\n", encoding="utf-8")
+                for cwd, other in ((project, worktree), (worktree, project)):
+                    with self.subTest(pointer_style=pointer_style, cwd=cwd):
+                        git_result = self.run_cmd("git", "-C", str(cwd), "rev-parse", "--git-common-dir")
+                        self.assertEqual(git_result.returncode, 0, git_result.stderr)
+                        self.assertEqual((cwd / git_result.stdout.rstrip("\r\n")).resolve(), git_dir)
+                        result = self.run_cmd(
+                            sys.executable,
+                            "skills/context-handoff-pack/scripts/codex_handoff_probe.py",
+                            "--home", str(home), "--cwd", str(cwd), "--format", "json",
+                        )
+                        self.assertEqual(result.returncode, 0, result.stderr)
+                        self.assertEqual(
+                            {row["session_id"] for row in json.loads(result.stdout)["sessions"]}, {"main", "linked"},
+                        )
+                        for skill in ("agent-patterns", "context-handoff-pack", "agent-session-pattern-miner"):
+                            utils = self.load_module(
+                                f"{skill.replace('-', '_')}_trailing_space_utils",
+                                ROOT / "skills" / skill / "scripts/session_log_utils.py",
+                            )
+                            self.assertEqual(utils.common_git_dir(cwd), git_dir)
+                            self.assertTrue(utils.same_repository_scope(str(cwd), str(other)))
+
     def test_jsonl_readers_tolerate_malformed_scalars_arrays_and_null(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             home = Path(tmp)
