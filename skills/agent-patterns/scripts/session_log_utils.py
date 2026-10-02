@@ -199,7 +199,7 @@ def same_repository_scope(session_cwd: str, requested_cwd: str) -> bool:
     requested_root = discover_git_root(requested_path)
     if session_root is not None and requested_root is not None:
         return session_root == requested_root
-    return session_path == requested_path or session_path.is_relative_to(requested_path)
+    return session_path == requested_path
 
 
 def discover_git_root(path: Path) -> Path | None:
